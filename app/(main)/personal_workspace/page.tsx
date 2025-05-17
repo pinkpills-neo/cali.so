@@ -26,18 +26,19 @@ export default function PersonalWorkspacePage() {
 }
 
 function WorkspaceContent() {
-  const [topics, setTopics] = useState<Array<{ name: string, uuid: string }>>([])
+  const [topics, setTopics] = useState<Array<TopicWithTodos>>([])
   const [showNewTopicModal, setShowNewTopicModal] = useState(false)
   const [newTopicName, setNewTopicName] = useState('')
   
   useEffect(() => {
     const fetchTopics = async () => {
       try {
-        const response = await fetch('/api/topics')
+        const response = await fetch('/api/topics') 
         if (!response.ok) {
           throw new Error('获取主题列表失败')
         }
         const data = await response.json()
+        console.log('[WorkspaceContent] Fetched topics data from API:', data);
         setTopics(data)
       } catch (error) {
         console.error('获取主题列表失败:', error)
@@ -45,7 +46,7 @@ function WorkspaceContent() {
     }
 
     fetchTopics()
-  }, [])
+  }, []) 
 
   const handleCreateTopic = async () => {
     if (newTopicName.trim()) {
@@ -93,6 +94,7 @@ function WorkspaceContent() {
               key={topic.uuid}
               name={topic.name}
               uuid={topic.uuid}
+              initialTodos={topic.todos} // <--- 确保这一行存在并且正确传递了 topic.todos
               onRename={(newName) => {
                 setTopics(topics.map(t => 
                   t.uuid === topic.uuid ? { ...t, name: newName } : t

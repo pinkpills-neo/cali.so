@@ -92,7 +92,6 @@ export async function POST(req: NextRequest) {
     const newTodoData = {
       content: content.trim(),
       topicId: relatedTopic._id, // 使用 Topic 的实际 ObjectId
-      // userId, // <--- 确保此行存在，将获取到的 userId 添加到新 todo 数据中
       priority: priority || Priority.NONE,
       dueDate: dueDate || undefined,
       status: TodoStatus.PENDING,

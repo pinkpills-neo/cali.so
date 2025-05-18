@@ -17,10 +17,20 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
   const [newTodo, setNewTodo] = useState('');
   const [priority, setPriority] = useState<Priority>(Priority.NONE);
   const [dueDate, setDueDate] = useState<string>('');
-  const [draggedItemId, setDraggedItemId] = useState<string | null>(null); // 新增状态来跟踪拖拽的项
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [expandedTodos, setExpandedTodos] = useState<Record<string, boolean>>({}); // 新增状态：todoId -> isExpanded
 
   useEffect(() => {
     setTodos(initialTodos || []);
+    // 可选：根据 initialTodos 初始化 expandedTodos，例如默认全部折叠或展开
+    const initialExpandedState: Record<string, boolean> = {};
+    initialTodos.forEach(todo => {
+      // 检查这个 todo 是否有子项
+      if (initialTodos.some(child => child.parentId === todo._id)) {
+        initialExpandedState[todo._id] = true; // 默认展开有子项的
+      }
+    });
+    setExpandedTodos(initialExpandedState);
   }, [initialTodos, name]);
 
   const handleToggleTodoStatus = async (todoId: string) => {
@@ -163,6 +173,13 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       // 上述的 setTodos 调用仅更新了被移动项的 parentId，
       // 其旧父级和新父级的 children 数组在本地状态中可能未同步，除非渲染逻辑能动态构建层级。
 
+      // 当一个 todo 被移动后，如果它成为了新的父项，可以考虑默认展开它
+      if (newParentId) {
+        // setExpandedTodos(prev => ({ ...prev, [newParentId]: true }));
+      }
+      // 如果被拖拽的项之前是展开的，并且不再有子项（或被移走），可能需要更新其展开状态
+      // 这个逻辑可以根据具体需求细化
+
     } catch (error) {
       console.error('重置父任务失败:', error);
       // 可以在这里添加用户提示，告知用户后端更新失败
@@ -185,6 +202,7 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
 
   const handleDropOnTodo = (e: React.DragEvent<HTMLDivElement>, targetTodoId: string) => {
     e.preventDefault();
+    e.stopPropagation(); // 防止事件冒泡到父级或其他拖放区域
     if (draggedItemId && draggedItemId !== targetTodoId) {
       console.log(`[DropOnTodo] dragged: ${draggedItemId} onto: ${targetTodoId}`);
       handleReparentTodo(draggedItemId, targetTodoId);
@@ -203,12 +221,86 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     setDraggedItemId(null); // 重置拖拽状态
   };
 
+  // 新增：切换待办事项展开/折叠状态的函数
+  const toggleExpandTodo = (todoId: string) => {
+    setExpandedTodos(prev => ({
+      ...prev,
+      [todoId]: !prev[todoId] // 如果是 undefined 或 false，则变为 true；如果是 true，则变为 false
+    }));
+  };
+
+  // 递归渲染函数，用于展示层级关系的 todos
+  const renderTodoItem = (todo: Todo, level: number) => {
+    const children = todos.filter(childTodo => childTodo.parentId === todo._id);
+    const indentation = level * 20; // 每层缩进 20px
+    const isExpanded = expandedTodos[todo._id] === true; // 明确检查 true，undefined 视为折叠
+
+    return (
+      <div key={todo._id}>
+        <div
+          className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-700 rounded-md"
+          style={{ marginLeft: `${indentation}px` }} // 应用缩进
+          draggable="true"
+          onDragStart={(e) => handleDragStart(e, todo._id)}
+          onDragOver={handleDragOver}
+          onDrop={(e) => handleDropOnTodo(e, todo._id)}
+        >
+          <div className="flex items-center flex-grow"> {/* 使用 flex-grow 使内容区占据剩余空间 */}
+            {/* 折叠/展开图标 */}
+            {children.length > 0 && (
+              <span 
+                onClick={() => toggleExpandTodo(todo._id)} 
+                className="mr-2 cursor-pointer text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                title={isExpanded ? "折叠" : "展开"}
+              >
+                {isExpanded ? '▼' : '▶'} {/* 使用简单字符作为图标 */}
+              </span>
+            )}
+            {/* 如果没有子项，但仍想保持对齐，可以放一个占位符 */}
+            {children.length === 0 && <span className="mr-2 w-[1em] inline-block"></span>} 
+            
+            <div
+              className="mr-2 cursor-grab text-zinc-400 hover:text-zinc-600"
+              title="拖拽以排序或改变层级"
+            >
+              ☰
+            </div>
+            <input
+              type="checkbox"
+              checked={todo.status === TodoStatus.COMPLETED}
+              onChange={() => handleToggleTodoStatus(todo._id)}
+              className="mr-3 h-5 w-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 dark:bg-zinc-600 dark:border-zinc-500"
+            />
+            <span className={`text-sm ${todo.status === TodoStatus.COMPLETED ? 'line-through text-zinc-500 dark:text-zinc-400' : 'text-zinc-800 dark:text-zinc-100'}`}>
+              {todo.content}
+            </span>
+          </div>
+          <span className={`px-2 py-0.5 text-xs rounded-full ${
+            todo.status === TodoStatus.COMPLETED
+              ? 'bg-green-100 text-green-700 dark:bg-green-700 dark:text-green-100'
+              : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-700 dark:text-yellow-100'
+          }`}>
+            {todo.status}
+          </span>
+        </div>
+        {/* 递归渲染子待办事项，仅当父项展开时 */}
+        {isExpanded && children.length > 0 && (
+          <div className="mt-1"> 
+            {children.map(child => renderTodoItem(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // 筛选出顶层待办事项 (没有 parentId 的)
+  const rootTodos = todos.filter(todo => !todo.parentId);
 
   return (
     <div 
       className="p-6 bg-white dark:bg-zinc-800 rounded-lg shadow"
-      onDragOver={handleDragOver} // 允许在整个区域拖放以成为根任务
-      onDrop={handleDropOnRoot}   // 处理拖放到根区域的逻辑
+      onDragOver={handleDragOver} 
+      onDrop={handleDropOnRoot}   
     >
       <div className="flex justify-between items-center mb-4">
         {isEditing ? (
@@ -234,46 +326,8 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
 
       {/* 渲染 Todos 列表 */}
       <div className="space-y-3 mb-4">
-        {todos && todos.length > 0 ? (
-          todos.map((todo) => (
-            <div 
-              key={todo._id} 
-              className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-700 rounded-md"
-              draggable="true" // 使整个 todo 项可拖拽
-              onDragStart={(e) => handleDragStart(e, todo._id)}
-              onDragOver={handleDragOver} // 允许在其上拖放
-              onDrop={(e) => handleDropOnTodo(e, todo._id)} // 处理拖放到此 todo 上的逻辑
-            >
-              <div className="flex items-center">
-                {/* 拖拽句柄图标 */}
-                <div 
-                  className="mr-2 cursor-grab text-zinc-400 hover:text-zinc-600"
-                  title="拖拽以排序或改变层级"
-                  // 如果只想让句柄可拖拽，而不是整个项，可以将 draggable 和 onDragStart 移到这里
-                  // draggable="true"
-                  // onDragStart={(e) => handleDragStart(e, todo._id)}
-                >
-                  ☰ {/* 简单的拖拽图标 */}
-                </div>
-                <input
-                  type="checkbox"
-                  checked={todo.status === TodoStatus.COMPLETED}
-                  onChange={() => handleToggleTodoStatus(todo._id)}
-                  className="mr-3 h-5 w-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 dark:bg-zinc-600 dark:border-zinc-500"
-                />
-                <span className={`text-sm ${todo.status === TodoStatus.COMPLETED ? 'line-through text-zinc-500 dark:text-zinc-400' : 'text-zinc-800 dark:text-zinc-100'}`}>
-                  {todo.content}
-                </span>
-              </div>
-              <span className={`px-2 py-0.5 text-xs rounded-full ${
-                todo.status === TodoStatus.COMPLETED 
-                  ? 'bg-green-100 text-green-700 dark:bg-green-700 dark:text-green-100' 
-                  : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-700 dark:text-yellow-100'
-              }`}>
-                {todo.status}
-              </span>
-            </div>
-          ))
+        {rootTodos.length > 0 ? (
+          rootTodos.map((todo) => renderTodoItem(todo, 0)) // 从 level 0 开始渲染顶层 todo
         ) : (
           <p className="text-sm text-zinc-500 dark:text-zinc-400">该主题下还没有待办事项。</p>
         )}
@@ -313,7 +367,6 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
             添加
           </button>
         </div>
-      </div> // 这是最外层 div 的闭合标签
-    // 移除了这里多余的 </div>
+      </div> 
   )
 }

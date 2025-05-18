@@ -65,11 +65,11 @@ const todoSchema = new mongoose.Schema({
     required: true
   },
   // 假设您之前已经添加了 userId 字段，如果还没有，请取消注释或添加它
-  // userId: {
-  //   type: String,
-  //   required: true,
-  //   index: true,
-  // },
+  userId: {
+    type: String,
+    required: true,
+    index: true,
+  },
 }, {
   timestamps: true // 自动管理 createdAt 和 updatedAt
 })

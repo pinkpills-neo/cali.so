@@ -20,6 +20,13 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [expandedTodos, setExpandedTodos] = useState<Record<string, boolean>>({}); // 新增状态：todoId -> isExpanded
 
+  // 新增状态：用于行内编辑 (请添加下面这几行)
+  const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+  const [currentEditContent, setCurrentEditContent] = useState<string>('');
+  const [currentEditPriority, setCurrentEditPriority] = useState<Priority>(Priority.NONE);
+  const [currentEditDueDate, setCurrentEditDueDate] = useState<string>(''); // 存储 YYYY-MM-DD格式
+  const [editingField, setEditingField] = useState<'content' | 'priority' | 'dueDate' | null>(null); // 新增状态
+
   useEffect(() => {
     setTodos(initialTodos || []);
     // 可选：根据 initialTodos 初始化 expandedTodos，例如默认全部折叠或展开
@@ -32,6 +39,217 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     });
     setExpandedTodos(initialExpandedState);
   }, [initialTodos, name]);
+
+  // 新增：格式化截止日期显示的辅助函数
+  const formatDateDisplay = (dueDateString: string | Date | undefined | null): string => {
+    if (!dueDateString) {
+      return ''; // 如果没有截止日期，返回空字符串
+    }
+
+    let targetDate: Date;
+    // 如果 dueDateString 是 'YYYY-MM-DD' 格式，需要特别处理以避免时区问题
+    // new Date('YYYY-MM-DD') 会被解析为 UTC 时间的午夜
+    // 我们希望按本地时区的日期来比较
+    if (typeof dueDateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dueDateString)) {
+      const [year, month, day] = dueDateString.split('-').map(Number);
+      targetDate = new Date(year, month - 1, day); // month 在 Date 构造函数中是 0-indexed
+    } else {
+      targetDate = new Date(dueDateString); // 处理 Date 对象或其他标准日期字符串格式
+    }
+
+    // 检查日期是否有效
+    if (isNaN(targetDate.getTime())) {
+        return '无效日期'; // 如果日期无效，返回提示
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // 将今天的日期设置为午夜，以便比较
+
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1); // 明天的日期
+    
+    // 为了比较，获取目标日期的午夜时间版本
+    const targetDateAtMidnight = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+
+    if (targetDateAtMidnight.getTime() === today.getTime()) {
+      return '今天';
+    }
+    if (targetDateAtMidnight.getTime() === tomorrow.getTime()) {
+      return '明天';
+    }
+
+    // 其他情况，显示具体日期
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth() + 1; // 月份转为 1-indexed
+    const day = targetDate.getDate();
+
+    if (year === today.getFullYear()) { // 如果是今年，不显示年份
+      return `${month}月${day}日`;
+    } else { // 否则显示完整年月日
+      return `${year}年${month}月${day}日`;
+    }
+  };
+
+  // 辅助函数：获取优先级的数值，用于排序 (数值越小，优先级越高)
+  const getPriorityValue = (priority: Priority | undefined): number => {
+    if (!priority) return 5; // 如果没有定义优先级，视为最低
+    switch (priority) {
+      case Priority.P00: return 0;
+      case Priority.P0: return 1;
+      case Priority.P1: return 2;
+      case Priority.P2: return 3;
+      case Priority.P3: return 4;
+      case Priority.NONE: return 5;
+      default: return 5; // 其他未知情况也视为最低
+    }
+  };
+
+  // 辅助函数：按优先级和状态排序 Todos
+  const sortByStatus = (a: Todo, b: Todo) => {
+    const priorityValueA = getPriorityValue(a.priority);
+    const priorityValueB = getPriorityValue(b.priority);
+
+    // 1. 按优先级排序
+    if (priorityValueA !== priorityValueB) {
+      return priorityValueA - priorityValueB; // 值小的（优先级高）在前
+    }
+
+    // 2. 如果优先级相同，则按状态排序 (未完成的在前，已完成的在后)
+    if (a.status === TodoStatus.COMPLETED && b.status !== TodoStatus.COMPLETED) {
+      return 1; // a (completed) 应该在 b (pending) 之后
+    }
+    if (a.status !== TodoStatus.COMPLETED && b.status === TodoStatus.COMPLETED) {
+      return -1; // a (pending) 应该在 b (completed) 之前
+    }
+    
+    // 3. 如果优先级和状态都相同，可以根据创建时间或其他字段排序，或者保持原有顺序
+    // 例如，按创建时间升序 (如果需要):
+    // if (a.createdAt && b.createdAt) {
+    //   return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    // }
+    return 0; // 优先级和状态都相同，顺序不变
+  };
+
+  const startEditingTodo = (todo: Todo, field: 'content' | 'priority' | 'dueDate') => {
+    setEditingTodoId(todo._id);
+    setEditingField(field); // 设置当前编辑的字段
+    setCurrentEditContent(todo.content);
+    setCurrentEditPriority(todo.priority);
+    if (todo.dueDate) {
+      const date = new Date(todo.dueDate);
+      const year = date.getFullYear();
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const day = date.getDate().toString().padStart(2, '0');
+      setCurrentEditDueDate(`${year}-${month}-${day}`);
+    } else {
+      setCurrentEditDueDate('');
+    }
+  };
+
+  const cancelEditingTodo = () => {
+    setEditingTodoId(null);
+    setEditingField(null); // <--- 添加: 重置当前编辑的字段
+    setCurrentEditContent('');
+    setCurrentEditPriority(Priority.NONE);
+    setCurrentEditDueDate('');
+  };
+
+  // 修正 handleSaveTodoEdits 以支持按字段保存
+  const handleSaveTodoEdits = async (todoId: string, fieldToSave?: 'content' | 'priority' | 'dueDate') => {
+    const currentField = fieldToSave || editingField;
+
+    if (!editingTodoId || editingTodoId !== todoId || !currentField) {
+      if (editingTodoId === todoId && !fieldToSave && !editingField) {
+        // Blur 触发，但 editingField 已被取消
+      } else if (editingTodoId === todoId && fieldToSave && editingField && fieldToSave !== editingField) {
+        // Blur 触发了一个字段的保存，但当前正在编辑的是另一个字段
+        return;
+      }
+      return;
+    }
+
+    const originalTodo = todos.find(t => t._id === todoId);
+    if (!originalTodo) {
+      console.error('Original todo not found for editing. Cancelling edit.');
+      cancelEditingTodo();
+      return;
+    }
+
+    const payload: Partial<Pick<Todo, 'content' | 'priority' | 'dueDate'>> = {};
+    let changed = false;
+
+    if (currentField === 'content') {
+      const trimmedContent = currentEditContent.trim();
+      if (trimmedContent === '') {
+        console.warn('Todo content cannot be empty. Edit not saved.');
+        return; // 保持编辑状态让用户修正
+      }
+      if (trimmedContent !== originalTodo.content) {
+        payload.content = trimmedContent;
+        changed = true;
+      }
+    } else if (currentField === 'priority') {
+      if (currentEditPriority !== originalTodo.priority) {
+        payload.priority = currentEditPriority;
+        changed = true;
+      }
+    } else if (currentField === 'dueDate') {
+      let originalDueDateString = '';
+      if (originalTodo.dueDate) {
+        // 将原始截止日期也格式化为 YYYY-MM-DD 以便比较
+        let tempDate;
+        if (typeof originalTodo.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(originalTodo.dueDate)) {
+            const [y, m, d] = originalTodo.dueDate.split('-').map(Number);
+            tempDate = new Date(y, m - 1, d);
+        } else {
+            tempDate = new Date(originalTodo.dueDate);
+        }
+        if (!isNaN(tempDate.getTime())) {
+            const year = tempDate.getFullYear();
+            const month = (tempDate.getMonth() + 1).toString().padStart(2, '0');
+            const day = tempDate.getDate().toString().padStart(2, '0');
+            originalDueDateString = `${year}-${month}-${day}`;
+        }
+      }
+      // currentEditDueDate 已经是 'YYYY-MM-DD' 或 ''
+      if (currentEditDueDate !== originalDueDateString) {
+        payload.dueDate = currentEditDueDate ? currentEditDueDate : null; // 如果为空字符串，则发送 null 以清除日期
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      cancelEditingTodo();
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/todos/${todoId}`, {
+        method: 'PUT', 
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload), // 只发送更改的字段
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: `更新待办事项 ${currentField} 失败，且无法解析错误响应` }));
+        throw new Error(errorData.message || `更新待办事项 ${currentField} 失败`);
+      }
+
+      const updatedTodoFromAPI = await response.json();
+
+      setTodos(prevTodos =>
+        prevTodos.map(t =>
+          t._id === todoId ? { ...t, ...updatedTodoFromAPI } : t
+        )
+      );
+
+      cancelEditingTodo(); 
+    } catch (error) {
+      console.error(`保存待办事项 ${currentField} 编辑失败:`, error);
+    }
+  };
 
   const handleToggleTodoStatus = async (todoId: string) => {
     const todoToUpdate = todos.find(t => t._id === todoId);
@@ -231,59 +449,251 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
 
   // 递归渲染函数，用于展示层级关系的 todos
   const renderTodoItem = (todo: Todo, level: number) => {
-    const children = todos.filter(childTodo => childTodo.parentId === todo._id);
-    const indentation = level * 20; // 每层缩进 20px
-    const isExpanded = expandedTodos[todo._id] === true; // 明确检查 true，undefined 视为折叠
+    const children = todos
+      .filter(childTodo => childTodo.parentId === todo._id)
+      .sort(sortByStatus); // 在这里对子项进行排序
+    const indentation = level * 20;
+    
+    // 这个标记整个条目是否处于任何编辑状态（用于通用样式和禁用某些操作）
+    const isAnyFieldEditing = editingTodoId === todo._id;
+
+    const isExpanded = todo.status === TodoStatus.COMPLETED && !isAnyFieldEditing // 如果完成且不在编辑，则折叠
+      ? false 
+      : expandedTodos[todo._id] === true;
+
+    // SVG 图标组件
+    // 用于“未折叠”状态 (isExpanded = true)，显示向下箭头，点击可折叠
+    const IconChevronDown = () => (
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        fill="none" 
+        viewBox="0 0 24 24" 
+        strokeWidth="1.5" 
+        stroke="currentColor" 
+        className="size-4" // Tailwind class for size (e.g., w-4 h-4)
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+      </svg>
+    );
+
+    // 用于“折叠”状态 (isExpanded = false)，显示向右箭头，点击可展开
+    const IconChevronRight = () => (
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        fill="none" 
+        viewBox="0 0 24 24" 
+        strokeWidth="1.5" 
+        stroke="currentColor" 
+        className="size-4" // Tailwind class for size (e.g., w-4 h-4)
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" /> 
+      </svg>
+    );
+
+    // 新增：自定义复选框SVG图标
+    const IconCheckboxUnchecked = () => (
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        fill="none" 
+        viewBox="0 0 24 24" 
+        strokeWidth="1.5" 
+        stroke="currentColor" 
+        className="size-5 text-gray-400 dark:text-gray-500" // 尺寸和颜色
+      >
+        <rect x="4.5" y="4.5" width="15" height="15" rx="2" strokeWidth="1.5"/>
+      </svg>
+    );
+
+    const IconCheckboxChecked = () => (
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        viewBox="0 0 24 24" 
+        fill="currentColor" // 使用 fill 来填充背景
+        className="size-5 text-gray-300 dark:text-gray-600" // 方框背景色
+      >
+        {/* 背景方框 (轻微圆角) */}
+        <rect x="4.5" y="4.5" width="15" height="15" rx="2" />
+        {/* 对勾图标 (颜色通过父级 text-gray-500 dark:text-gray-400 控制) */}
+        <path 
+          strokeLinecap="round" 
+          strokeLinejoin="round" 
+          d="M7.5 12l3 3 6-6" 
+          strokeWidth="2.5" // 加粗一点对勾
+          stroke="white" // 对勾用白色，使其在灰色背景上可见
+          fill="none" // 对勾本身不填充
+        /> 
+      </svg>
+    );
+
 
     return (
       <div key={todo._id}>
         <div
-          className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-700 rounded-md"
-          style={{ marginLeft: `${indentation}px` }} // 应用缩进
-          draggable="true"
-          onDragStart={(e) => handleDragStart(e, todo._id)}
+          className={`flex items-center justify-between p-3 rounded-md ${isAnyFieldEditing ? 'bg-zinc-100 dark:bg-zinc-600 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-700'}`}
+          style={{ marginLeft: `${indentation}px` }}
+          draggable={!isAnyFieldEditing} // 编辑时不可拖拽
+          onDragStart={(e) => !isAnyFieldEditing && handleDragStart(e, todo._id)}
           onDragOver={handleDragOver}
-          onDrop={(e) => handleDropOnTodo(e, todo._id)}
+          onDrop={(e) => !isAnyFieldEditing && handleDropOnTodo(e, todo._id)}
         >
-          <div className="flex items-center flex-grow"> {/* 使用 flex-grow 使内容区占据剩余空间 */}
+          <div className="flex items-center flex-grow min-w-0"> {/* min-w-0 解决 flex 溢出问题 */}
             {/* 折叠/展开图标 */}
             {children.length > 0 && (
               <span 
-                onClick={() => toggleExpandTodo(todo._id)} 
-                className="mr-2 cursor-pointer text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                onClick={() => !isAnyFieldEditing && toggleExpandTodo(todo._id)} 
+                className={`mr-2 flex items-center justify-center ${isAnyFieldEditing ? 'cursor-not-allowed text-zinc-400' : 'cursor-pointer text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
                 title={isExpanded ? "折叠" : "展开"}
               >
-                {isExpanded ? '▼' : '▶'} {/* 使用简单字符作为图标 */}
+                {isExpanded ? <IconChevronDown /> : <IconChevronRight />}
               </span>
             )}
-            {/* 如果没有子项，但仍想保持对齐，可以放一个占位符 */}
-            {children.length === 0 && <span className="mr-2 w-[1em] inline-block"></span>} 
+            {children.length === 0 && <span className="mr-2 w-4 inline-block h-4"></span>}
             
             <div
-              className="mr-2 cursor-grab text-zinc-400 hover:text-zinc-600"
-              title="拖拽以排序或改变层级"
+              className={`mr-2 text-zinc-400 ${isAnyFieldEditing ? 'cursor-not-allowed' : 'cursor-grab hover:text-zinc-600'}`}
+              title={isAnyFieldEditing ? "" : "拖拽以排序或改变层级"}
             >
               ☰
             </div>
-            <input
-              type="checkbox"
-              checked={todo.status === TodoStatus.COMPLETED}
-              onChange={() => handleToggleTodoStatus(todo._id)}
-              className="mr-3 h-5 w-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 dark:bg-zinc-600 dark:border-zinc-500"
-            />
-            <span className={`text-sm ${todo.status === TodoStatus.COMPLETED ? 'line-through text-zinc-500 dark:text-zinc-400' : 'text-zinc-800 dark:text-zinc-100'}`}>
-              {todo.content}
+            {/* 自定义复选框 */}
+            <span
+              onClick={() => !isAnyFieldEditing && handleToggleTodoStatus(todo._id)}
+              className={`mr-3 flex items-center justify-center ${isAnyFieldEditing ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+              role="checkbox"
+              aria-checked={todo.status === TodoStatus.COMPLETED}
+              tabIndex={isAnyFieldEditing ? -1 : 0}
+              onKeyDown={(e) => { if (!isAnyFieldEditing && (e.key === ' ' || e.key === 'Enter')) handleToggleTodoStatus(todo._id); }}
+            >
+              {todo.status === TodoStatus.COMPLETED ? <IconCheckboxChecked /> : <IconCheckboxUnchecked />}
             </span>
+
+            {/* 内容 */}
+            {isAnyFieldEditing && editingField === 'content' ? (
+              <input
+                type="text"
+                value={currentEditContent}
+                onChange={(e) => setCurrentEditContent(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveTodoEdits(todo._id, 'content');
+                  if (e.key === 'Escape') cancelEditingTodo();
+                }}
+                onBlur={() => handleSaveTodoEdits(todo._id, 'content')}
+                autoFocus
+                className="flex-grow text-sm bg-transparent border-b border-purple-500 dark:border-purple-400 focus:outline-none mr-2 min-w-[100px]"
+              />
+            ) : (
+              <span 
+                onClick={() => startEditingTodo(todo, 'content')}
+                className={`text-sm flex-grow mr-2 min-w-0 truncate ${todo.status === TodoStatus.COMPLETED ? 'line-through text-zinc-500 dark:text-zinc-400' : 'text-zinc-800 dark:text-zinc-100'} ${isAnyFieldEditing && editingField !== 'content' ? 'opacity-50' : 'cursor-pointer'}`}
+                title={todo.content}
+              >
+                {todo.content}
+              </span>
+            )}
+
+            {/* 优先级 */}
+            {isAnyFieldEditing && editingField === 'priority' ? (
+              <select
+                value={currentEditPriority}
+                onChange={(e) => {
+                  setCurrentEditPriority(e.target.value as Priority);
+                  // 可以在 select 变化后立即保存，或者等待 blur/enter
+                  // 为了简单起见，这里我们让 onBlur 处理保存
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') cancelEditingTodo();
+                  // Enter 在 select 上的行为可能不一致，依赖 onBlur
+                }}
+                onBlur={() => handleSaveTodoEdits(todo._id, 'priority')}
+                autoFocus
+                className="ml-2 px-1 py-0.5 text-xs rounded-md border border-purple-500 dark:border-purple-400 dark:bg-zinc-700 focus:outline-none"
+              >
+                <option value={Priority.NONE}>无</option>
+                <option value={Priority.P00}>P00</option>
+                <option value={Priority.P0}>P0</option>
+                <option value={Priority.P1}>P1</option>
+                <option value={Priority.P2}>P2</option>
+                <option value={Priority.P3}>P3</option>
+              </select>
+            ) : (
+              <>
+                {todo.priority && todo.priority !== Priority.NONE && (
+                  <span 
+                    onClick={() => startEditingTodo(todo, 'priority')}
+                    className={`ml-2 px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 dark:bg-blue-700 dark:text-blue-100 whitespace-nowrap ${isAnyFieldEditing && editingField !== 'priority' ? 'opacity-50' : 'cursor-pointer'}`}
+                  >
+                    {todo.priority}
+                  </span>
+                )}
+                {(!todo.priority || todo.priority === Priority.NONE) && (
+                  <span
+                      onClick={() => startEditingTodo(todo, 'priority')}
+                      className={`ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 ${isAnyFieldEditing && editingField !== 'priority' ? 'opacity-50' : 'cursor-pointer'}`}
+                  >
+                      设优先级
+                  </span>
+                )}
+              </>
+            )}
           </div>
-          <span className={`px-2 py-0.5 text-xs rounded-full ${
-            todo.status === TodoStatus.COMPLETED
-              ? 'bg-green-100 text-green-700 dark:bg-green-700 dark:text-green-100'
-              : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-700 dark:text-yellow-100'
-          }`}>
-            {todo.status}
-          </span>
+
+          {/* 截止日期 */}
+          <div className="flex-shrink-0 ml-2 flex items-center"> {/* Added flex items-center */}
+            {isAnyFieldEditing && editingField === 'dueDate' ? (
+              <input
+                type="date"
+                value={currentEditDueDate} // YYYY-MM-DD
+                onChange={(e) => setCurrentEditDueDate(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveTodoEdits(todo._id, 'dueDate');
+                  if (e.key === 'Escape') cancelEditingTodo();
+                }}
+                onBlur={() => handleSaveTodoEdits(todo._id, 'dueDate')}
+                autoFocus
+                className="px-1 py-0.5 text-xs rounded-md border border-purple-500 dark:border-purple-400 dark:bg-zinc-700 focus:outline-none"
+              />
+            ) : (
+              todo.dueDate ? (
+                <span 
+                  onClick={() => startEditingTodo(todo, 'dueDate')}
+                  className={`text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap ${isAnyFieldEditing && editingField !== 'dueDate' ? 'opacity-50' : 'cursor-pointer'}`}
+                >
+                  {formatDateDisplay(todo.dueDate)} {/* <--- 使用新的格式化函数 */}
+                </span>
+              ) : (
+                <span 
+                  onClick={() => startEditingTodo(todo, 'dueDate')}
+                  className={`px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap ${isAnyFieldEditing && editingField !== 'dueDate' ? 'opacity-50' : 'cursor-pointer'}`}
+                >
+                  设截止日
+                </span>
+              )
+            )}
+            {/* 操作按钮等其他可能使用编辑状态的地方 */}
+            {/* 假设这里是第 586 行附近的代码 */}
+            {isAnyFieldEditing && ( // <--- 修改这里：将 isCurrentlyEditing 替换为 isAnyFieldEditing
+              <div className="ml-auto flex items-center space-x-2">
+                {/* 可能的保存或取消按钮，或者其他仅在编辑时显示的元素 */}
+                {/* 例如:
+                <button 
+                  onClick={() => handleSaveTodoEdits(todo._id, editingField || undefined)} 
+                  className="p-1 text-green-500 hover:text-green-700"
+                  title="保存"
+                >
+                  <svg className="size-4" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"></path></svg>
+                </button>
+                <button 
+                  onClick={cancelEditingTodo} 
+                  className="p-1 text-red-500 hover:text-red-700"
+                  title="取消"
+                >
+                  <svg className="size-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd"></path></svg>
+                </button>
+                */}
+              </div>
+            )}
+          </div>
         </div>
-        {/* 递归渲染子待办事项，仅当父项展开时 */}
         {isExpanded && children.length > 0 && (
           <div className="mt-1"> 
             {children.map(child => renderTodoItem(child, level + 1))}
@@ -293,8 +703,10 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     );
   };
 
-  // 筛选出顶层待办事项 (没有 parentId 的)
-  const rootTodos = todos.filter(todo => !todo.parentId);
+  // 筛选出顶层待办事项 (没有 parentId 的) 并排序
+  const rootTodos = todos
+    .filter(todo => !todo.parentId)
+    .sort(sortByStatus); // 在这里对根级待办事项进行排序
 
   return (
     <div 
@@ -327,7 +739,7 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       {/* 渲染 Todos 列表 */}
       <div className="space-y-3 mb-4">
         {rootTodos.length > 0 ? (
-          rootTodos.map((todo) => renderTodoItem(todo, 0)) // 从 level 0 开始渲染顶层 todo
+          rootTodos.map((todo) => renderTodoItem(todo, 0))
         ) : (
           <p className="text-sm text-zinc-500 dark:text-zinc-400">该主题下还没有待办事项。</p>
         )}
@@ -339,6 +751,11 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
             type="text"
             value={newTodo}
             onChange={(e) => setNewTodo(e.target.value)}
+            onKeyDown={(e) => { // 新增 onKeyDown 事件处理器
+              if (e.key === 'Enter') {
+                handleAddTodo();
+              }
+            }}
             placeholder="添加新的待办事项..."
             className="flex-1 px-3 py-2 rounded-lg border dark:border-zinc-700 dark:bg-zinc-800"
           />
@@ -370,3 +787,30 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       </div> 
   )
 }
+
+// 新增辅助函数：格式化截止日期，显示“今天”、“明天”、“后天”或具体日期
+const formatDueDateRelativeToToday = (dateString?: string): string => {
+  if (!dateString) return '';
+
+  const dueDate = new Date(dateString);
+  const today = new Date();
+
+  // 将日期标准化到当天的开始，以便准确比较天数差异
+  dueDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  const diffTime = dueDate.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return "今天";
+  } else if (diffDays === 1) {
+    return "明天";
+  } else if (diffDays === 2) {
+    return "后天";
+  } else {
+    // 对于其他日期，使用原始的 dateString 进行格式化，以保留原始时间（如果需要）
+    // 但通常截止日期我们只关心日期部分，所以用 dueDate 也可以
+    return new Date(dateString).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
+  }
+};

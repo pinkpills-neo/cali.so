@@ -107,12 +107,8 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     const priorityValueA = getPriorityValue(a.priority);
     const priorityValueB = getPriorityValue(b.priority);
 
-    // 1. 按优先级排序
-    if (priorityValueA !== priorityValueB) {
-      return priorityValueA - priorityValueB; // 值小的（优先级高）在前
-    }
 
-    // 2. 如果优先级相同，则按状态排序 (未完成的在前，已完成的在后)
+    // 1. 则按状态排序 (未完成的在前，已完成的在后)
     if (a.status === TodoStatus.COMPLETED && b.status !== TodoStatus.COMPLETED) {
       return 1; // a (completed) 应该在 b (pending) 之后
     }
@@ -120,6 +116,12 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       return -1; // a (pending) 应该在 b (completed) 之前
     }
     
+    // 2. 按优先级排序
+    if (priorityValueA !== priorityValueB) {
+      return priorityValueA - priorityValueB; // 值小的（优先级高）在前
+    }
+
+        
     // 3. 如果优先级和状态都相同，可以根据创建时间或其他字段排序，或者保持原有顺序
     // 例如，按创建时间升序 (如果需要):
     // if (a.createdAt && b.createdAt) {
@@ -663,7 +665,7 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
                       onClick={() => startEditingTodo(todo, 'priority')}
                       className={`ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 ${isAnyFieldEditing && editingField !== 'priority' ? 'opacity-50' : 'cursor-pointer'}`}
                   >
-                      设优先级
+                      无优先级
                   </span>
                 )}
               </>
@@ -698,7 +700,7 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
                   onClick={() => startEditingTodo(todo, 'dueDate')}
                   className={`px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 whitespace-nowrap ${isAnyFieldEditing && editingField !== 'dueDate' ? 'opacity-50' : 'cursor-pointer'}`}
                 >
-                  设截止日
+                  DDL
                 </span>
               )
             )}
@@ -741,8 +743,8 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
 
         </div>
         {isExpanded && children.length > 0 && (
-          <div className="mt-1"> 
-            {children.map(child => renderTodoItem(child, level + 1))}
+          <div className={`mt-1 overflow-hidden transition-all duration-200 ease-in-out ${isExpanded ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+            {children.map(childTodo => renderTodoItem(childTodo, level + 1))}
           </div>
         )}
       </div>

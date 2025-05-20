@@ -1,5 +1,6 @@
 import { auth } from '@clerk/nextjs'; // 确保已导入 auth
-import { TodoModel, TodoStatus, Priority } from '~/models/Todo'; // 确保导入正确
+
+import { Priority,TodoModel, TodoStatus } from '~/models/Todo'; // 确保导入正确
 
 export async function POST(req: NextRequest) {
   try {
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const topicId = searchParams.get('topicId');
 
-    let query: any = { userId }; // 基础查询条件：只获取当前用户的 todos
+    const query: any = { userId }; // 基础查询条件：只获取当前用户的 todos
 
     if (topicId) {
       query.topicId = topicId; // 如果提供了 topicId，则进一步筛选

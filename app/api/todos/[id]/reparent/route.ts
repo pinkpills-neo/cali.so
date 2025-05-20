@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '~/lib/mongodb';
-import { TodoModel, type Todo } from '~/models/Todo'; // 确保 Todo 类型被导入
 import { auth } from '@clerk/nextjs';
 import mongoose from 'mongoose';
+import { type NextRequest, NextResponse } from 'next/server';
+
+import { connectToDatabase } from '~/lib/mongodb';
+import {TodoModel } from '~/models/Todo'; // 确保 Todo 类型被导入
 
 export async function PATCH(
   req: NextRequest,

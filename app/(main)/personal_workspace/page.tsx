@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Container } from '~/components/ui/Container'
 import { motion } from 'framer-motion'
+import { useEffect,useState } from 'react'
+
+import { Container } from '~/components/ui/Container'
+
 import TopicSection from './components/TopicSection'
 
 export default function PersonalWorkspacePage() {

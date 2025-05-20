@@ -1,5 +1,6 @@
-import mongoose, { Document, Model, Schema } from 'mongoose';
-import { Topic } from './Topic'; // 假设 Topic 模型也已定义
+import mongoose, { type Document, type Model, Schema } from 'mongoose';
+
+import { type Topic } from './Topic'; // 假设 Topic 模型也已定义
 
 export enum Priority {
   NONE = 'NONE',

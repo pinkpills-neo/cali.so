@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs'; // 确保导入 auth
+import { type NextRequest, NextResponse } from 'next/server';
+
 import { connectToDatabase } from '~/lib/mongodb';
 import { TopicModel } from '~/models/Topic';
-import { auth } from '@clerk/nextjs'; // 确保导入 auth
 
 export async function GET(req: NextRequest) {
   try {

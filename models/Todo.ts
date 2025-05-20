@@ -1,4 +1,4 @@
-import mongoose, { Schema, model, models, Document, Types } from 'mongoose' // 确保导入 Document 和 Types
+import mongoose, { type Document, model, models, type Types } from 'mongoose' // 确保导入 Document 和 Types
 
 export enum Priority {
   NONE = 'NONE',

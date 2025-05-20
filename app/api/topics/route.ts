@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '~/lib/mongodb';
-import { Topic } from '~/models/Topic'; // 确保 Topic 模型已正确导出
-import { TodoModel } from '~/models/Todo'; // 新增：导入 TodoModel
 import { auth } from '@clerk/nextjs';
 import { nanoid } from 'nanoid'; // 用于生成 uuid，如果创建 Topic 时需要
+import { type NextRequest, NextResponse } from 'next/server';
+
+import { connectToDatabase } from '~/lib/mongodb';
+import { TodoModel } from '~/models/Todo'; // 新增：导入 TodoModel
+import { Topic } from '~/models/Topic'; // 确保 Topic 模型已正确导出
 
 export async function GET(req: NextRequest) {
   console.log('[API Topics GET] Received request to fetch all topics for the user.');

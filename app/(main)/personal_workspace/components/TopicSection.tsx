@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Todo, Priority, TodoStatus } from '~/models/Todo'
+import { useEffect,useState } from 'react'
+
+import { Priority, type Todo, TodoStatus } from '~/models/Todo'
 
 interface TopicSectionProps {
   name: string
@@ -43,23 +44,20 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
   // 新增：格式化截止日期显示的辅助函数
   const formatDateDisplay = (dueDateString: string | Date | undefined | null): string => {
     if (!dueDateString) {
-      return ''; // 如果没有截止日期，返回空字符串
+      return '';
     }
 
     let targetDate: Date;
-    // 如果 dueDateString 是 'YYYY-MM-DD' 格式，需要特别处理以避免时区问题
-    // new Date('YYYY-MM-DD') 会被解析为 UTC 时间的午夜
-    // 我们希望按本地时区的日期来比较
     if (typeof dueDateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dueDateString)) {
       const [year, month, day] = dueDateString.split('-').map(Number);
-      targetDate = new Date(year, month - 1, day); // month 在 Date 构造函数中是 0-indexed
+      // L203, L207: Ensure map(Number) results are treated as numbers for Date constructor
+      targetDate = new Date(year, month - 1, day);
     } else {
-      targetDate = new Date(dueDateString); // 处理 Date 对象或其他标准日期字符串格式
+      targetDate = new Date(dueDateString);
     }
 
-    // 检查日期是否有效
     if (isNaN(targetDate.getTime())) {
-        return '无效日期'; // 如果日期无效，返回提示
+        return '无效日期';
     }
 
     const today = new Date();
@@ -353,6 +351,42 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     }
   } // Added missing closing brace for handleAddTodo
 
+
+  // 新增：处理删除待办事项的函数
+  const handleDeleteTodo = async (todoId: string) => {
+    if (!confirm('确定要删除这个待办事项及其所有子项吗？')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/todos/${todoId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('删除待办事项失败');
+      }
+
+      // 更新本地状态，移除被删除的待办事项及其所有子项
+      setTodos(prevTodos => {
+        const removeTodoAndChildren = (todoId: string): string[] => {
+          const childrenIds = prevTodos
+            .filter(t => t.parentId === todoId)
+            .map(t => t._id);
+          
+          return [todoId, ...childrenIds.flatMap(removeTodoAndChildren)];
+        };
+
+        const idsToRemove = removeTodoAndChildren(todoId);
+        return prevTodos.filter(todo => !idsToRemove.includes(todo._id));
+      });
+
+    } catch (error) {
+      console.error('删除待办事项失败:', error);
+      alert('删除待办事项失败，请稍后重试');
+    }
+  };
+
   const handleReparentTodo = async (draggedTodoId: string, newParentId: string | null) => {
     console.log(`[TopicSection] Reparenting todo: ${draggedTodoId} to new parent: ${newParentId}`);
     if (draggedTodoId === newParentId) {
@@ -451,7 +485,7 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
   const renderTodoItem = (todo: Todo, level: number) => {
     const children = todos
       .filter(childTodo => childTodo.parentId === todo._id)
-      .sort(sortByStatus); // 在这里对子项进行排序
+      .sort(sortByStatus); // 在这里对子项进行排序 (现在会使用外部定义的 sortByStatus)
     const indentation = level * 20;
     
     // 这个标记整个条目是否处于任何编辑状态（用于通用样式和禁用某些操作）
@@ -490,7 +524,14 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       </svg>
     );
 
-    // 新增：自定义复选框SVG图标
+    // 新增：垃圾桶图标组件
+    const IconTrash = () => (
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+      </svg>
+    );
+
+  
     const IconCheckboxUnchecked = () => (
       <svg 
         xmlns="http://www.w3.org/2000/svg" 
@@ -529,14 +570,14 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     return (
       <div key={todo._id}>
         <div
-          className={`flex items-center justify-between p-3 rounded-md ${isAnyFieldEditing ? 'bg-zinc-100 dark:bg-zinc-600 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-700'}`}
+          className={`flex items-center justify-between p-3 rounded-md ${isAnyFieldEditing ? 'bg-zinc-100 dark:bg-zinc-600 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-600'}`}
           style={{ marginLeft: `${indentation}px` }}
-          draggable={!isAnyFieldEditing} // 编辑时不可拖拽
+          draggable={!isAnyFieldEditing}
           onDragStart={(e) => !isAnyFieldEditing && handleDragStart(e, todo._id)}
           onDragOver={handleDragOver}
           onDrop={(e) => !isAnyFieldEditing && handleDropOnTodo(e, todo._id)}
         >
-          <div className="flex items-center flex-grow min-w-0"> {/* min-w-0 解决 flex 溢出问题 */}
+          <div className="flex items-center flex-grow min-w-0"> {/* 左侧和中间内容 */}
             {/* 折叠/展开图标 */}
             {children.length > 0 && (
               <span 
@@ -574,10 +615,10 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
                 value={currentEditContent}
                 onChange={(e) => setCurrentEditContent(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveTodoEdits(todo._id, 'content');
+                  if (e.key === 'Enter') void handleSaveTodoEdits(todo._id, 'content'); // L426: Add void
                   if (e.key === 'Escape') cancelEditingTodo();
                 }}
-                onBlur={() => handleSaveTodoEdits(todo._id, 'content')}
+                onBlur={() => void handleSaveTodoEdits(todo._id, 'content')} // L437: Add void
                 autoFocus
                 className="flex-grow text-sm bg-transparent border-b border-purple-500 dark:border-purple-400 focus:outline-none mr-2 min-w-[100px]"
               />
@@ -597,14 +638,11 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
                 value={currentEditPriority}
                 onChange={(e) => {
                   setCurrentEditPriority(e.target.value as Priority);
-                  // 可以在 select 变化后立即保存，或者等待 blur/enter
-                  // 为了简单起见，这里我们让 onBlur 处理保存
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') cancelEditingTodo();
-                  // Enter 在 select 上的行为可能不一致，依赖 onBlur
                 }}
-                onBlur={() => handleSaveTodoEdits(todo._id, 'priority')}
+                onBlur={() => void handleSaveTodoEdits(todo._id, 'priority')} // L565: Add void
                 autoFocus
                 className="ml-2 px-1 py-0.5 text-xs rounded-md border border-purple-500 dark:border-purple-400 dark:bg-zinc-700 focus:outline-none"
               >
@@ -645,10 +683,10 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
                 value={currentEditDueDate} // YYYY-MM-DD
                 onChange={(e) => setCurrentEditDueDate(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveTodoEdits(todo._id, 'dueDate');
+                  if (e.key === 'Enter') void handleSaveTodoEdits(todo._id, 'dueDate'); // L648: Add void
                   if (e.key === 'Escape') cancelEditingTodo();
                 }}
-                onBlur={() => handleSaveTodoEdits(todo._id, 'dueDate')}
+                onBlur={() => void handleSaveTodoEdits(todo._id, 'dueDate')} // L577: (Mistake in log, should be around here) Add void
                 autoFocus
                 className="px-1 py-0.5 text-xs rounded-md border border-purple-500 dark:border-purple-400 dark:bg-zinc-700 focus:outline-none"
               />
@@ -693,6 +731,19 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
               </div>
             )}
           </div>
+
+          {/* 删除按钮 */}
+          {!isAnyFieldEditing && (
+            <button
+              onClick={() => void handleDeleteTodo(todo._id)}
+              className="ml-3 p-1 text-gray-400 hover:text-red-500 focus:outline-none flex-shrink-0"
+              title="删除待办事项"
+              aria-label="删除待办事项"
+            >
+              <IconTrash />
+            </button>
+          )}
+
         </div>
         {isExpanded && children.length > 0 && (
           <div className="mt-1"> 
@@ -787,30 +838,3 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       </div> 
   )
 }
-
-// 新增辅助函数：格式化截止日期，显示“今天”、“明天”、“后天”或具体日期
-const formatDueDateRelativeToToday = (dateString?: string): string => {
-  if (!dateString) return '';
-
-  const dueDate = new Date(dateString);
-  const today = new Date();
-
-  // 将日期标准化到当天的开始，以便准确比较天数差异
-  dueDate.setHours(0, 0, 0, 0);
-  today.setHours(0, 0, 0, 0);
-
-  const diffTime = dueDate.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-  if (diffDays === 0) {
-    return "今天";
-  } else if (diffDays === 1) {
-    return "明天";
-  } else if (diffDays === 2) {
-    return "后天";
-  } else {
-    // 对于其他日期，使用原始的 dateString 进行格式化，以保留原始时间（如果需要）
-    // 但通常截止日期我们只关心日期部分，所以用 dueDate 也可以
-    return new Date(dateString).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' });
-  }
-};

@@ -1,7 +1,8 @@
+import { auth } from '@clerk/nextjs'
 import { NextResponse } from 'next/server'
+
 import { connectToDatabase } from '~/lib/mongodb'
 import { Topic } from '~/models/Topic'
-import { auth } from '@clerk/nextjs'
 
 export async function PUT(
   request: Request,

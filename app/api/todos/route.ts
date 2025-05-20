@@ -98,7 +98,6 @@ export async function POST(req: NextRequest) {
       userId:userId,
     };
     console.log('[API Todos POST] Prepared new Todo data:', JSON.stringify(newTodoData, null, 2));
-
     const todo = new TodoModel(newTodoData);
     console.log('[API Todos POST] New Todo instance created (before save):', JSON.stringify(todo.toObject(), null, 2));
   

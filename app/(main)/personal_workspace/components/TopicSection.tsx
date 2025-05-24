@@ -868,6 +868,9 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     .filter(todo => !todo.parentId)
     .sort(sortByStatus); // 在这里对根级待办事项进行排序
 
+  // 新增：筛选出所有 P00 优先级的待办事项
+  const p00Todos = todos.filter(todo => todo.priority === Priority.P00);
+
   return (
     <div 
       className="p-6 bg-white dark:bg-zinc-800 rounded-lg shadow"
@@ -895,6 +898,20 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
         )}
         {/* 可以添加删除主题的按钮等 */}
       </div>
+
+      {/* 新增：显示 P00 待办事项列表 */}
+      {p00Todos.length > 0 && (
+        <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900 rounded-md">
+          <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-200 mb-2">P00 紧急事项:</h3>
+          <ul className="list-disc list-inside space-y-1">
+            {p00Todos.map(todo => (
+              <li key={todo._id} className={`text-xs ${todo.status === TodoStatus.COMPLETED ? 'line-through text-zinc-500 dark:text-zinc-400' : 'text-zinc-700 dark:text-zinc-200'}`}>
+                {todo.content}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* 渲染 Todos 列表 */}
       <div className="space-y-3 mb-4">

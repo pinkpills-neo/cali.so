@@ -451,9 +451,9 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
 
   // 新增：处理删除待办事项的函数
   const handleDeleteTodo = async (todoId: string) => {
-    if (!confirm('确定要删除这个待办事项及其所有子项吗？')) {
-      return;
-    }
+    // REMOVED: if (!confirm('确定要删除这个待办事项及其所有子项吗？')) {
+    // REMOVED:   return;
+    // REMOVED: }
 
     // 1. 找到要删除的待办事项及其所有子项，并保存其原始状态以备回滚
     const originalTodos = [...todos]; // 保存当前所有todos的副本
@@ -597,6 +597,10 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       ? false 
       : expandedTodos[todo._id] === true;
 
+    // 根据层级确定高度样式
+    const heightStyle = level > 0 ? { transform: 'scaleY(0.7)', transformOrigin: 'top' } : {};
+    const paddingStyle = level > 0 ? 'py-2 px-3' : 'p-3'; // 子项减少垂直 padding
+
     // SVG 图标组件
     // 用于“未折叠”状态 (isExpanded = true)，显示向下箭头，点击可折叠
     const IconChevronDown = () => (
@@ -672,8 +676,11 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     return (
       <div key={todo._id}>
         <div
-          className={`flex items-center justify-between p-3 rounded-md ${isAnyFieldEditing ? 'bg-zinc-100 dark:bg-zinc-600 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-600'}`}
-          style={{ marginLeft: `${indentation}px` }}
+          className={`flex items-center justify-between rounded-md ${isAnyFieldEditing ? 'bg-zinc-100 dark:bg-zinc-600 shadow-lg' : 'bg-zinc-50 dark:bg-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-600'} ${paddingStyle}`}
+          style={{ 
+            marginLeft: `${indentation}px`, 
+            ...(level > 0 ? { transform: 'scaleY(0.9)', transformOrigin: 'center left', marginBottom: '-3px', marginTop: '-3px' } : {}) 
+          }} // 应用高度调整和外边距补偿
           draggable={!isAnyFieldEditing}
           onDragStart={(e) => !isAnyFieldEditing && handleDragStart(e, todo._id)}
           onDragOver={handleDragOver}
@@ -837,7 +844,7 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
           {/* 删除按钮 */}
           {!isAnyFieldEditing && (
             <button
-              onClick={() => void handleDeleteTodo(todo._id)}
+              onClick={() => void handleDeleteTodo(todo._id)} // L785: Add void
               className="ml-3 p-1 text-gray-400 hover:text-red-500 focus:outline-none flex-shrink-0"
               title="删除待办事项"
               aria-label="删除待办事项"

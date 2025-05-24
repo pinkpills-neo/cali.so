@@ -154,7 +154,7 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
     setCurrentEditDueDate('');
   };
 
-  // 修正 handleSaveTodoEdits 以支持按字段保存
+  // 修正 handleSaveTodoEdits 以支持按字段保存和乐观更新
   const handleSaveTodoEdits = async (todoId: string, fieldToSave?: 'content' | 'priority' | 'dueDate') => {
     const currentField = fieldToSave || editingField;
 
@@ -175,31 +175,36 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       return;
     }
 
-    const payload: Partial<Pick<Todo, 'content' | 'priority' | 'dueDate'>> = {};
+    // 1. 准备乐观更新的数据和原始数据以备回滚
+    const oldTodos = [...todos]; // 保存当前所有todos的副本
+    let optimisticUpdatePayload: Partial<Todo> = {};
+    let actualApiPayload: Partial<Pick<Todo, 'content' | 'priority' | 'dueDate'>> = {};
     let changed = false;
 
     if (currentField === 'content') {
       const trimmedContent = currentEditContent.trim();
       if (trimmedContent === '') {
         console.warn('Todo content cannot be empty. Edit not saved.');
-        return; // 保持编辑状态让用户修正
+        // 保持编辑状态让用户修正，不进行乐观更新或API调用
+        return; 
       }
       if (trimmedContent !== originalTodo.content) {
-        payload.content = trimmedContent;
+        optimisticUpdatePayload.content = trimmedContent;
+        actualApiPayload.content = trimmedContent;
         changed = true;
       }
     } else if (currentField === 'priority') {
       if (currentEditPriority !== originalTodo.priority) {
-        payload.priority = currentEditPriority;
+        optimisticUpdatePayload.priority = currentEditPriority;
+        actualApiPayload.priority = currentEditPriority;
         changed = true;
       }
     } else if (currentField === 'dueDate') {
       let originalDueDateString = '';
       if (originalTodo.dueDate) {
-        // 将原始截止日期也格式化为 YYYY-MM-DD 以便比较
         let tempDate;
         if (typeof originalTodo.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(originalTodo.dueDate)) {
-            const [y, m, d] = originalTodo.dueDate.split('-').map(Number);
+            const [y, m, d] = originalTodo.dueDate.split('-').map((n): number => parseInt(n, 10)); // 确保类型安全
             tempDate = new Date(y, m - 1, d);
         } else {
             tempDate = new Date(originalTodo.dueDate);
@@ -211,9 +216,10 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
             originalDueDateString = `${year}-${month}-${day}`;
         }
       }
-      // currentEditDueDate 已经是 'YYYY-MM-DD' 或 ''
       if (currentEditDueDate !== originalDueDateString) {
-        payload.dueDate = currentEditDueDate ? currentEditDueDate : null; // 如果为空字符串，则发送 null 以清除日期
+        const newDueDate = currentEditDueDate ? currentEditDueDate : null;
+        optimisticUpdatePayload.dueDate = newDueDate;
+        actualApiPayload.dueDate = newDueDate;
         changed = true;
       }
     }
@@ -222,131 +228,225 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       cancelEditingTodo();
       return;
     }
+    
+    // 2. 立即更新前端状态
+    optimisticUpdatePayload.updatedAt = new Date().toISOString(); // 更新修改时间
+    setTodos(prevTodos =>
+      prevTodos.map(t =>
+        t._id === todoId ? { ...t, ...optimisticUpdatePayload } : t
+      )
+    );
+    // 退出编辑状态前先保存当前编辑值，以便回滚时恢复
+    const tempEditContent = currentEditContent;
+    const tempEditPriority = currentEditPriority;
+    const tempEditDueDate = currentEditDueDate;
+
+    cancelEditingTodo(); // 先取消编辑状态，避免UI与数据不一致
 
     try {
+      // 3. 异步发送请求到后端
       const response = await fetch(`/api/todos/${todoId}`, {
         method: 'PUT', 
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload), // 只发送更改的字段
+        body: JSON.stringify(actualApiPayload), // 只发送更改的字段
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: `更新待办事项 ${currentField} 失败，且无法解析错误响应` }));
-        throw new Error(errorData.message || `更新待办事项 ${currentField} 失败`);
+        const errorData = await response.json().catch(() => ({ message: `更新待办事项 ${String(currentField)} 失败，且无法解析错误响应` }));
+        throw new Error(errorData.message || `更新待办事项 ${String(currentField)} 失败`);
       }
 
       const updatedTodoFromAPI = await response.json();
 
+      // 4. 如果成功，用后端返回的真实数据更新前端状态 (确保数据一致性，特别是updatedAt等字段)
       setTodos(prevTodos =>
         prevTodos.map(t =>
           t._id === todoId ? { ...t, ...updatedTodoFromAPI } : t
         )
       );
 
-      cancelEditingTodo(); 
     } catch (error) {
-      console.error(`保存待办事项 ${currentField} 编辑失败:`, error);
+      console.error(`保存待办事项 ${String(currentField)} 编辑失败:`, error);
+      // 5. 如果失败，回滚前端状态
+      setTodos(oldTodos);
+      // 重新进入编辑状态，并恢复之前编辑的值，让用户可以修正
+      // 注意：这里需要确保 startEditingTodo 和相关状态设置的逻辑正确
+      // 为了简化，我们也可以只提示错误，不自动恢复编辑状态
+      // startEditingTodo(originalTodo, currentField);
+      // setCurrentEditContent(tempEditContent);
+      // setCurrentEditPriority(tempEditPriority);
+      // setCurrentEditDueDate(tempEditDueDate);
+      alert(`保存待办事项 ${String(currentField)} 编辑失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
-  const handleToggleTodoStatus = async (todoId: string) => {
+  const handleToggleTodoStatus = async (todoId: string): Promise<void> => {
     const todoToUpdate = todos.find(t => t._id === todoId);
     if (!todoToUpdate) return;
 
-    const newStatus = todoToUpdate.status === TodoStatus.COMPLETED ? TodoStatus.PENDING : TodoStatus.COMPLETED;
+    // 1. 确定新的状态并保存原始状态以备回滚
+    const oldTodos = [...todos];
+    const originalStatus = todoToUpdate.status;
+    const newStatus = originalStatus === TodoStatus.COMPLETED ? TodoStatus.PENDING : TodoStatus.COMPLETED;
+    const optimisticUpdate = { 
+      status: newStatus, 
+      updatedAt: new Date().toISOString() 
+    };
+
+    // 2. 立即更新前端状态
+    setTodos(prevTodos => 
+      prevTodos.map(t => 
+        t._id === todoId ? { ...t, ...optimisticUpdate } : t
+      )
+    );
 
     try {
-      // 这一部分的 fetch 调用是导致 404 错误的地方
+      // 3. 异步发送请求到后端
       const response = await fetch(`/api/todos/${todoId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus }), // 只发送状态的改变
       });
 
       if (!response.ok) {
-        // 由于是 404, response.ok 会是 false
-        const errorData = await response.json().catch(() => ({ message: '更新待办事项状态失败，且无法解析错误响应' })); // 添加 catch 以防响应体不是 JSON
+        const errorData = await response.json().catch(() => ({ message: '更新待办事项状态失败，且无法解析错误响应' }));
         throw new Error(errorData.message || '更新待办事项状态失败');
       }
 
-      const updatedTodo = await response.json();
+      const updatedTodoFromAPI = await response.json();
 
+      // 4. 如果成功，用后端返回的真实数据更新前端状态 (确保updatedAt等与后端一致)
       setTodos(prevTodos => 
         prevTodos.map(t => 
-          t._id === todoId ? { ...t, status: updatedTodo.status } : t
+          t._id === todoId ? { ...t, ...updatedTodoFromAPI } : t
         )
       );
     } catch (error) {
       console.error('更新待办事项状态失败:', error);
-      // 可以在这里添加用户提示，告知用户后端更新失败
+      // 5. 如果失败，回滚前端状态
+      setTodos(oldTodos);
+      alert(`更新待办事项状态失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
   const handleRename = async () => {
-    const trimmedName = editedName.trim()
-    if (trimmedName && trimmedName !== name) {
+    const trimmedName = editedName.trim();
+    const originalName = name; // 保存原始名称以备回滚
+
+    if (trimmedName && trimmedName !== originalName) {
+      // 2. 乐观更新：立即更新UI
+      onRename(trimmedName); // 更新父组件状态
+      setIsEditing(false);   // 退出编辑模式
+
       try {
-        const response = await fetch(`/api/topics/${uuid}`, {  // 修改为正确的API路径
+        // 3. 异步发送请求到后端
+        const response = await fetch(`/api/topics/${uuid}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ name: trimmedName }),
-        })
-
-        const data = await response.json()
+        });
 
         if (!response.ok) {
-          throw new Error(data.message || '重命名失败')
+          const data = await response.json().catch(() => ({ message: '重命名失败，且无法解析错误响应' }));
+          throw new Error(data.message || '重命名失败');
         }
 
-        onRename(trimmedName)
-        setIsEditing(false)
+        // 4. 如果成功，不需要额外操作，因为UI已经更新
+        // const updatedTopicFromAPI = await response.json(); // 如果需要用后端数据同步，可以在这里处理
+
       } catch (error) {
-        console.error('重命名失败:', error)
-        setEditedName(name)
-        setIsEditing(false)
+        console.error('重命名失败:', error);
+        // 5. 如果失败，回滚前端状态
+        onRename(originalName);    // 回滚父组件状态
+        setEditedName(originalName); // 回滚本地编辑框状态 (虽然此时isEditing为false，但以防万一)
+        // setIsEditing(true); // 可选：如果希望用户能直接修改，可以重新进入编辑状态
+        alert(`重命名失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     } else {
-      setIsEditing(false)
-      setEditedName(name)
+      // 如果名称未更改或为空，则仅退出编辑模式并重置编辑名称
+      setIsEditing(false);
+      setEditedName(originalName);
     }
-  }
+  };
 
   const handleAddTodo = async () => {
     if (newTodo.trim()) {
+      // 1. 创建一个临时的 todo 对象用于即时显示
+      // 注意：为了在后端创建前拥有唯一标识，可以生成一个临时ID
+      // 这里我们暂时使用 Date.now() 作为示例，实际项目中建议使用更可靠的UUID库
+      const tempId = `temp-${Date.now()}`;
+      const optimisticTodo: Todo = {
+        _id: tempId, // 临时ID
+        content: newTodo.trim(),
+        topicId: uuid,
+        priority: priority,
+        dueDate: dueDate || null, // 确保 dueDate 为 null 如果是空字符串
+        status: TodoStatus.PENDING,
+        createdAt: new Date().toISOString(), // 临时创建时间
+        updatedAt: new Date().toISOString(), // 临时更新时间
+        // parentId 和 children 暂时不处理，或根据需求初始化
+      };
+
+      // 2. 立即更新前端状态
+      setTodos(prevTodos => [...prevTodos, optimisticTodo]);
+      
+      // 清空输入框
+      const oldNewTodo = newTodo;
+      const oldPriority = priority;
+      const oldDueDate = dueDate;
+      setNewTodo('');
+      setPriority(Priority.NONE);
+      setDueDate('');
+
       try {
+        // 3. 异步发送请求到后端
         const response = await fetch('/api/todos', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            content: newTodo.trim(),
-            topicId: uuid,
-            priority: priority, // Corrected: use priority state variable
-            dueDate: dueDate || undefined,
+            content: optimisticTodo.content,
+            topicId: optimisticTodo.topicId,
+            priority: optimisticTodo.priority,
+            dueDate: optimisticTodo.dueDate,
+            // status 会由后端默认设置或根据业务逻辑处理
           }),
-        })
+        });
 
         if (!response.ok) {
-          throw new Error('添加待办事项失败')
+          const errorData = await response.json().catch(() => ({ message: '添加待办事项失败，且无法解析错误响应' }));
+          throw new Error(errorData.message || '添加待办事项失败');
         }
 
-        const data = await response.json()
-        setTodos([...todos, data])
-        setNewTodo('')
-        setPriority(Priority.NONE) // Corrected: use setPriority
-        setDueDate('')
+        const savedTodo = await response.json();
+
+        // 4. 如果成功，用后端返回的真实数据更新前端状态 (替换临时对象)
+        setTodos(prevTodos => 
+          prevTodos.map(todo => 
+            todo._id === tempId ? { ...savedTodo, _id: savedTodo._id } : todo
+          )
+        );
+
       } catch (error) {
-        console.error('添加待办事项失败:', error)
+        console.error('添加待办事项失败:', error);
+        // 5. 如果失败，回滚前端状态 (移除临时添加的todo)
+        setTodos(prevTodos => prevTodos.filter(todo => todo._id !== tempId));
+        // 恢复输入框内容，方便用户重试
+        setNewTodo(oldNewTodo);
+        setPriority(oldPriority);
+        setDueDate(oldDueDate);
+        // 可以在这里添加用户提示，例如使用一个 toast 通知
+        alert(`添加待办事项失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-  } // Added missing closing brace for handleAddTodo
+  }; // Added missing closing brace for handleAddTodo
 
 
   // 新增：处理删除待办事项的函数
@@ -355,32 +455,37 @@ export default function TopicSection({ name, uuid, initialTodos, onRename }: Top
       return;
     }
 
+    // 1. 找到要删除的待办事项及其所有子项，并保存其原始状态以备回滚
+    const originalTodos = [...todos]; // 保存当前所有todos的副本
+    const getTodoAndAllChildrenIds = (id: string, currentTodos: Todo[]): string[] => {
+      const children = currentTodos.filter(t => t.parentId === id).map(t => t._id);
+      return [id, ...children.flatMap(childId => getTodoAndAllChildrenIds(childId, currentTodos))];
+    };
+    const idsToRemove = getTodoAndAllChildrenIds(todoId, todos);
+    const todosToRemove = originalTodos.filter(todo => idsToRemove.includes(todo._id));
+
+    // 2. 立即更新前端状态，移除被删除的待办事项及其所有子项
+    setTodos(prevTodos => prevTodos.filter(todo => !idsToRemove.includes(todo._id)));
+
     try {
+      // 3. 异步发送请求到后端
       const response = await fetch(`/api/todos/${todoId}`, {
         method: 'DELETE',
       });
 
       if (!response.ok) {
-        throw new Error('删除待办事项失败');
+        const errorData = await response.json().catch(() => ({ message: '删除待办事项失败，且无法解析错误响应' }));
+        throw new Error(errorData.message || '删除待办事项失败');
       }
 
-      // 更新本地状态，移除被删除的待办事项及其所有子项
-      setTodos(prevTodos => {
-        const removeTodoAndChildren = (todoId: string): string[] => {
-          const childrenIds = prevTodos
-            .filter(t => t.parentId === todoId)
-            .map(t => t._id);
-          
-          return [todoId, ...childrenIds.flatMap(removeTodoAndChildren)];
-        };
-
-        const idsToRemove = removeTodoAndChildren(todoId);
-        return prevTodos.filter(todo => !idsToRemove.includes(todo._id));
-      });
+      // 4. 如果成功，不需要额外操作，因为前端状态已经更新
+      // console.log('待办事项及其子项已成功删除');
 
     } catch (error) {
       console.error('删除待办事项失败:', error);
-      alert('删除待办事项失败，请稍后重试');
+      // 5. 如果失败，回滚前端状态
+      setTodos(originalTodos); // 恢复到删除操作之前的状态
+      alert(`删除待办事项失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
